@@ -11,14 +11,14 @@ from packaging import version
 
 logpy = logging.getLogger(__name__)
 
-try:
-    import xformers
-    import xformers.ops
+# try:
+#     import xformers
+#     import xformers.ops
 
-    XFORMERS_IS_AVAILABLE = True
-except:
-    XFORMERS_IS_AVAILABLE = False
-    logpy.warning("no module 'xformers'. Processing without...")
+#     XFORMERS_IS_AVAILABLE = True
+# except:
+XFORMERS_IS_AVAILABLE = False
+logpy.warning("no module 'xformers'. Processing without...")
 
 from ...modules.attention import LinearAttention, MemoryEfficientCrossAttention
 
@@ -238,24 +238,34 @@ class MemoryEfficientAttnBlock(nn.Module):
         B, C, H, W = q.shape
         q, k, v = map(lambda x: rearrange(x, "b c h w -> b (h w) c"), (q, k, v))
 
-        q, k, v = map(
-            lambda t: t.unsqueeze(3)
-            .reshape(B, t.shape[1], 1, C)
-            .permute(0, 2, 1, 3)
-            .reshape(B * 1, t.shape[1], C)
-            .contiguous(),
-            (q, k, v),
-        )
-        out = xformers.ops.memory_efficient_attention(
-            q, k, v, attn_bias=None, op=self.attention_op
-        )
+        # NOTE: Use of PyTorch's scaled_dot_product_attention
+        q = q.unsqueeze(1)  # [B, 1, H*W, C]
+        k = k.unsqueeze(1)  # [B, 1, H*W, C]
+        v = v.unsqueeze(1)  # [B, 1, H*W, C]
 
-        out = (
-            out.unsqueeze(0)
-            .reshape(B, 1, out.shape[1], C)
-            .permute(0, 2, 1, 3)
-            .reshape(B, out.shape[1], C)
-        )
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        out = out.squeeze(1)
+
+        ### NOTE: This is original implementation
+        # q, k, v = map(
+        #     lambda t: t.unsqueeze(3)
+        #     .reshape(B, t.shape[1], 1, C)
+        #     .permute(0, 2, 1, 3)
+        #     .reshape(B * 1, t.shape[1], C)
+        #     .contiguous(),
+        #     (q, k, v),
+        # )
+        # out = xformers.ops.memory_efficient_attention(
+        #     q, k, v, attn_bias=None, op=self.attention_op
+        # )
+
+        # out = (
+        #     out.unsqueeze(0)
+        #     .reshape(B, 1, out.shape[1], C)
+        #     .permute(0, 2, 1, 3)
+        #     .reshape(B, out.shape[1], C)
+        # )
+
         return rearrange(out, "b (h w) c -> b c h w", b=B, h=H, w=W, c=C)
 
     def forward(self, x, **kwargs):

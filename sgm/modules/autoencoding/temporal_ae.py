@@ -187,7 +187,8 @@ class MemoryEfficientVideoBlock(MemoryEfficientAttnBlock):
             d_head=in_channels,
             checkpoint=False,
             ff_in=True,
-            attn_mode="softmax-xformers",
+            attn_mode="softmax",
+            # attn_mode="softmax-xformers",
         )
 
         time_embed_dim = self.in_channels * 4

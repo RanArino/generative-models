@@ -46,14 +46,14 @@ else:
         f"You might want to consider upgrading."
     )
 
-try:
-    import xformers
-    import xformers.ops
+# try:
+#     import xformers
+#     import xformers.ops
 
-    XFORMERS_IS_AVAILABLE = True
-except:
-    XFORMERS_IS_AVAILABLE = False
-    logpy.warn("no module 'xformers'. Processing without...")
+#     XFORMERS_IS_AVAILABLE = True
+# except:
+XFORMERS_IS_AVAILABLE = False
+logpy.warn("no module 'xformers'. Processing without...")
 
 # from .diffusionmodules.util import mixed_checkpoint as checkpoint
 
@@ -162,7 +162,7 @@ class SelfAttention(nn.Module):
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
-        attn_mode: str = "xformers",
+        attn_mode: str = "torch",
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -187,11 +187,11 @@ class SelfAttention(nn.Module):
             q, k, v = qkv[0], qkv[1], qkv[2]  # B H L D
             x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
             x = rearrange(x, "B H L D -> B L (H D)")
-        elif self.attn_mode == "xformers":
-            qkv = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.num_heads)
-            q, k, v = qkv[0], qkv[1], qkv[2]  # B L H D
-            x = xformers.ops.memory_efficient_attention(q, k, v)
-            x = rearrange(x, "B L H D -> B L (H D)", H=self.num_heads)
+        # elif self.attn_mode == "xformers":
+        #     qkv = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.num_heads)
+        #     q, k, v = qkv[0], qkv[1], qkv[2]  # B L H D
+        #     x = xformers.ops.memory_efficient_attention(q, k, v)
+        #     x = rearrange(x, "B L H D -> B L (H D)", H=self.num_heads)
         elif self.attn_mode == "math":
             qkv = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
             q, k, v = qkv[0], qkv[1], qkv[2]  # B H L D
@@ -403,50 +403,81 @@ class MemoryEfficientCrossAttention(nn.Module):
                 n=n_times_crossframe_attn_in_self,
             )
 
-        b, _, _ = q.shape
-        q, k, v = map(
-            lambda t: t.unsqueeze(3)
-            .reshape(b, t.shape[1], self.heads, self.dim_head)
-            .permute(0, 2, 1, 3)
-            .reshape(b * self.heads, t.shape[1], self.dim_head)
-            .contiguous(),
-            (q, k, v),
-        )
-
-        # actually compute the attention, what we cannot get enough of
-        if version.parse(xformers.__version__) >= version.parse("0.0.21"):
-            # NOTE: workaround for
-            # https://github.com/facebookresearch/xformers/issues/845
-            max_bs = 32768
-            N = q.shape[0]
-            n_batches = math.ceil(N / max_bs)
-            out = list()
-            for i_batch in range(n_batches):
-                batch = slice(i_batch * max_bs, (i_batch + 1) * max_bs)
-                out.append(
-                    xformers.ops.memory_efficient_attention(
-                        q[batch],
-                        k[batch],
-                        v[batch],
-                        attn_bias=None,
-                        op=self.attention_op,
-                    )
+        ### NOTE: Use of PyTorch's scaled_dot_product_attention
+        q = rearrange(q, "b n (h d) -> b h n d", h=self.heads)
+        k = rearrange(k, "b n (h d) -> b h n d", h=self.heads)
+        v = rearrange(v, "b n (h d) -> b h n d", h=self.heads)
+        
+        # Handle large batch sizes
+        max_bs = 32768 // self.heads  # Adjust batch size per head
+        if q.shape[0] > max_bs:
+            outs = []
+            for i in range(0, q.shape[0], max_bs):
+                end_idx = min(i + max_bs, q.shape[0])
+                batch_q = q[i:end_idx]
+                batch_k = k[i:end_idx]
+                batch_v = v[i:end_idx]
+                batch_out = torch.nn.functional.scaled_dot_product_attention(
+                    batch_q, batch_k, batch_v,
+                    attn_mask=mask,
                 )
-            out = torch.cat(out, 0)
+                outs.append(batch_out)
+            out = torch.cat(outs, dim=0)
         else:
-            out = xformers.ops.memory_efficient_attention(
-                q, k, v, attn_bias=None, op=self.attention_op
+            out = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=mask,
             )
 
-        # TODO: Use this directly in the attention operation, as a bias
-        if exists(mask):
-            raise NotImplementedError
-        out = (
-            out.unsqueeze(0)
-            .reshape(b, self.heads, out.shape[1], self.dim_head)
-            .permute(0, 2, 1, 3)
-            .reshape(b, out.shape[1], self.heads * self.dim_head)
-        )
+        # Reshape back
+        out = rearrange(out, "b h n d -> b n (h d)")
+
+        ### NOTE: This is original implementation
+        # b, _, _ = q.shape
+        # q, k, v = map(
+        #     lambda t: t.unsqueeze(3)
+        #     .reshape(b, t.shape[1], self.heads, self.dim_head)
+        #     .permute(0, 2, 1, 3)
+        #     .reshape(b * self.heads, t.shape[1], self.dim_head)
+        #     .contiguous(),
+        #     (q, k, v),
+        # )
+
+        # # actually compute the attention, what we cannot get enough of
+        # if version.parse(xformers.__version__) >= version.parse("0.0.21"):
+        #     # NOTE: workaround for
+        #     # https://github.com/facebookresearch/xformers/issues/845
+        #     max_bs = 32768
+        #     N = q.shape[0]
+        #     n_batches = math.ceil(N / max_bs)
+        #     out = list()
+        #     for i_batch in range(n_batches):
+        #         batch = slice(i_batch * max_bs, (i_batch + 1) * max_bs)
+        #         out.append(
+        #             xformers.ops.memory_efficient_attention(
+        #                 q[batch],
+        #                 k[batch],
+        #                 v[batch],
+        #                 attn_bias=None,
+        #                 op=self.attention_op,
+        #             )
+        #         )
+        #     out = torch.cat(out, 0)
+        # else:
+        #     out = xformers.ops.memory_efficient_attention(
+        #         q, k, v, attn_bias=None, op=self.attention_op
+        #     )
+
+        # # TODO: Use this directly in the attention operation, as a bias
+        # if exists(mask):
+        #     raise NotImplementedError
+        # out = (
+        #     out.unsqueeze(0)
+        #     .reshape(b, self.heads, out.shape[1], self.dim_head)
+        #     .permute(0, 2, 1, 3)
+        #     .reshape(b, out.shape[1], self.heads * self.dim_head)
+        # )
+        
         if additional_tokens is not None:
             # remove additional token
             out = out[:, n_tokens_to_mask:]
