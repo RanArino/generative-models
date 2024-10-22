@@ -358,6 +358,13 @@ class ResBlock(TimestepBlock):
             return self._forward(x, emb)
 
     def _forward(self, x: th.Tensor, emb: th.Tensor) -> th.Tensor:
+        if self.training:
+            dtype = th.float32
+        else:
+            dtype = x.dtype
+            for param in self.parameters():
+                param.data = param.data.to(dtype)
+
         if self.updown:
             in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
             h = in_rest(x)

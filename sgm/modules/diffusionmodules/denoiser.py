@@ -20,19 +20,27 @@ class Denoiser(nn.Module):
     def possibly_quantize_c_noise(self, c_noise: torch.Tensor) -> torch.Tensor:
         return c_noise
 
-    def forward(
-        self,
-        network: nn.Module,
-        input: torch.Tensor,
-        sigma: torch.Tensor,
-        cond: Dict,
-        **additional_model_inputs,
-    ) -> torch.Tensor:
+    def forward(self, network, input, sigma, cond, **additional_model_inputs):
+        """
+        Args:
+            network: The diffusion model
+            input: Input tensor
+            sigma: Noise level
+            cond: Conditioning dictionary
+        """
+        # Ensure all inputs are float32
+        input = input.to(torch.float32)
+        sigma = sigma.to(torch.float32)
+        
         sigma = self.possibly_quantize_sigma(sigma)
         sigma_shape = sigma.shape
         sigma = append_dims(sigma, input.ndim)
         c_skip, c_out, c_in, c_noise = self.scaling(sigma)
         c_noise = self.possibly_quantize_c_noise(c_noise.reshape(sigma_shape))
+        
+        # Convert scaling factors to float32
+        c_skip, c_out, c_in = [x.to(torch.float32) for x in [c_skip, c_out, c_in]]
+        
         return (
             network(input * c_in, c_noise, cond, **additional_model_inputs) * c_out
             + input * c_skip

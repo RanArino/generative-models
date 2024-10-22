@@ -71,6 +71,11 @@ class VideoResBlock(ResBlock):
         num_video_frames: int,
         image_only_indicator: Optional[th.Tensor] = None,
     ) -> th.Tensor:
+        # Match model parameters to input dtype during inference
+        if not self.training:
+            dtype = x.dtype
+            for param in self.parameters():
+                param.data = param.data.to(dtype)
         x = super().forward(x, emb)
 
         x_mix = rearrange(x, "(b t) c h w -> b c t h w", t=num_video_frames)
