@@ -16,6 +16,15 @@ def disabled_train(self, mode=True):
     does not change anymore."""
     return self
 
+def get_torch_device() -> torch.device:
+    """
+    Returns the best available device: CUDA > MPS > CPU
+    """
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        return torch.device('mps')
+    return torch.device('cpu')
 
 def get_string_from_tuple(s):
     try:
@@ -51,11 +60,19 @@ def is_power_of_two(n):
 
 def autocast(f, enabled=True):
     def do_autocast(*args, **kwargs):
-        with torch.cuda.amp.autocast(
-            enabled=enabled,
-            dtype=torch.get_autocast_gpu_dtype(),
-            cache_enabled=torch.is_autocast_cache_enabled(),
-        ):
+        device = get_torch_device()
+        if device.type == 'cuda':
+            with torch.cuda.amp.autocast(
+                enabled=enabled,
+                dtype=torch.get_autocast_gpu_dtype(),
+                cache_enabled=torch.is_autocast_cache_enabled(),
+            ):
+                return f(*args, **kwargs)
+        elif device.type == 'mps':
+            with torch.amp.autocast(device_type='mps', enabled=enabled):
+                return f(*args, **kwargs)
+        else:
+            # For CPU, just run without autocast
             return f(*args, **kwargs)
 
     return do_autocast

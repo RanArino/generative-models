@@ -13,7 +13,7 @@ from ...modules.diffusionmodules.sampling_utils import (get_ancestral_step,
                                                         linear_multistep_coeff,
                                                         to_d, to_neg_log_sigma,
                                                         to_sigma)
-from ...util import append_dims, default, instantiate_from_config
+from ...util import append_dims, default, instantiate_from_config, get_torch_device
 
 DEFAULT_GUIDER = {"target": "sgm.modules.diffusionmodules.guiders.IdentityGuider"}
 
@@ -25,7 +25,7 @@ class BaseDiffusionSampler:
         num_steps: Union[int, None] = None,
         guider_config: Union[Dict, ListConfig, OmegaConf, None] = None,
         verbose: bool = False,
-        device: str = "cuda",
+        device: str = get_torch_device().type,
     ):
         self.num_steps = num_steps
         self.discretization = instantiate_from_config(discretization_config)
