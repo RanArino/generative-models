@@ -407,9 +407,12 @@ class MemoryEfficientCrossAttention(nn.Module):
         q = rearrange(q, "b n (h d) -> b h n d", h=self.heads)
         k = rearrange(k, "b n (h d) -> b h n d", h=self.heads)
         v = rearrange(v, "b n (h d) -> b h n d", h=self.heads)
+
+        # Handle large batch sizes by splitting computation
+        max_bs = 16  # Adjust this value based on your memory constraints
+        b = q.shape[0]
         
-        # Handle large batch sizes
-        max_bs = 32768 // self.heads  # Adjust batch size per head
+        # max_bs = 32768 // self.heads  # Adjust batch size per head
         if q.shape[0] > max_bs:
             outs = []
             for i in range(0, q.shape[0], max_bs):
@@ -477,7 +480,7 @@ class MemoryEfficientCrossAttention(nn.Module):
         #     .permute(0, 2, 1, 3)
         #     .reshape(b, out.shape[1], self.heads * self.dim_head)
         # )
-        
+
         if additional_tokens is not None:
             # remove additional token
             out = out[:, n_tokens_to_mask:]
