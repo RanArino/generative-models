@@ -10,7 +10,7 @@ from omegaconf import ListConfig
 from PIL import Image
 from torch import autocast
 
-from sgm.util import append_dims
+from sgm.util import append_dims, get_torch_device
 
 
 class WatermarkEmbedder:
@@ -111,7 +111,7 @@ def do_sample(
     batch2model_input: Optional[List] = None,
     return_latents=False,
     filter=None,
-    device="cuda",
+    device=get_torch_device().type,
 ):
     if force_uc_zero_embeddings is None:
         force_uc_zero_embeddings = []
@@ -170,7 +170,7 @@ def do_sample(
                 return samples
 
 
-def get_batch(keys, value_dict, N: Union[List, ListConfig], device="cuda"):
+def get_batch(keys, value_dict, N: Union[List, ListConfig], device=get_torch_device().type):
     # Hardcoded demo setups; might undergo some changes in the future
 
     batch = {}
@@ -227,7 +227,7 @@ def get_batch(keys, value_dict, N: Union[List, ListConfig], device="cuda"):
     return batch, batch_uc
 
 
-def get_input_image_tensor(image: Image.Image, device="cuda"):
+def get_input_image_tensor(image: Image.Image, device=get_torch_device().type):
     w, h = image.size
     print(f"loaded input image of size ({w}, {h})")
     width, height = map(
@@ -252,7 +252,7 @@ def do_img2img(
     return_latents=False,
     skip_encode=False,
     filter=None,
-    device="cuda",
+    device=get_torch_device().type,
 ):
     with torch.no_grad():
         with autocast(device) as precision_scope:

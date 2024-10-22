@@ -1,6 +1,7 @@
 from pytorch_lightning import seed_everything
 
 from scripts.demo.streamlit_helpers import *
+from sgm.util import get_torch_device
 
 SAVE_PATH = "outputs/demo/txt2img/"
 
@@ -91,7 +92,7 @@ VERSION2SPECS = {
 }
 
 
-def load_img(display=True, key=None, device="cuda"):
+def load_img(display=True, key=None, device=get_torch_device().type):
     image = get_interactive_image(key=key)
     if image is None:
         return None

@@ -5,12 +5,13 @@ import torch.utils.benchmark as benchmark
 from torch.backends.cuda import SDPBackend
 
 from sgm.modules.attention import BasicTransformerBlock, SpatialTransformer
+from sgm.util import get_torch_device
 
 
 def benchmark_attn():
     # Lets define a helpful benchmarking function:
     # https://pytorch.org/tutorials/intermediate/scaled_dot_product_attention_tutorial.html
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_torch_device().type
 
     def benchmark_torch_function_in_microseconds(f, *args, **kwargs):
         t0 = benchmark.Timer(
@@ -138,7 +139,7 @@ def run_model(model, x, context):
 
 
 def benchmark_transformer_blocks():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_torch_device().type
     import torch.utils.benchmark as benchmark
 
     def benchmark_torch_function_in_microseconds(f, *args, **kwargs):

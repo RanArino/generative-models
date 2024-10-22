@@ -29,7 +29,7 @@ from scripts.sampling.simple_video_sample import (
 )
 from scripts.util.detection.nsfw_and_watermark_dectection import DeepFloydDataFiltering
 from sgm.inference.helpers import embed_watermark
-from sgm.util import default, instantiate_from_config
+from sgm.util import default, instantiate_from_config, get_torch_device
 
 # To download all svd models
 # hf_hub_download(repo_id="stabilityai/stable-video-diffusion-img2vid-xt", filename="svd_xt.safetensors", local_dir="checkpoints")
@@ -53,7 +53,7 @@ else:
 
 
 version = "svd_xt_1_1"  # replace with 'svd_xt' or 'svd' for other models
-device = "cuda"
+device = get_torch_device().type
 max_64_bit_int = 2**63 - 1
 
 if version == "svd_xt_1_1":
@@ -80,7 +80,7 @@ def sample(
     version: str = "svd_xt_1_1",
     cond_aug: float = 0.02,
     decoding_t: int = 7,  # Number of frames decoded at a time! This eats most VRAM. Reduce if necessary.
-    device: str = "cuda",
+    device: str = get_torch_device().type,
     output_folder: str = "outputs",
     progress=gr.Progress(track_tqdm=True),
 ):

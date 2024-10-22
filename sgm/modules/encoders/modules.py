@@ -626,7 +626,9 @@ class FrozenOpenCLIPImageEmbedder(AbstractEmbModel):
         x = kornia.geometry.resize(
             x,
             (224, 224),
-            interpolation="bicubic",
+            # interpolation="bicubic",
+            # Changing the interpolation mode from `bicubic` to `bilinear` ensures compatibility with the MPS device
+            interpolation="bilinear",
             align_corners=True,
             antialias=self.antialias,
         )

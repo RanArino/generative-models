@@ -2,6 +2,7 @@ from st_keyup import st_keyup
 from streamlit_helpers import *
 
 from sgm.modules.diffusionmodules.sampling import EulerAncestralSampler
+from sgm.util import get_torch_device
 
 VERSION2SPECS = {
     "SDXL-Turbo": {
@@ -47,7 +48,7 @@ class SubstepSampler(EulerAncestralSampler):
 
 def seeded_randn(shape, seed):
     randn = np.random.RandomState(seed).randn(*shape)
-    randn = torch.from_numpy(randn).to(device="cuda", dtype=torch.float32)
+    randn = torch.from_numpy(randn).to(device=get_torch_device().type, dtype=torch.float32)
     return randn
 
 
