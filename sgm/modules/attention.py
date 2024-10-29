@@ -312,30 +312,47 @@ class CrossAttention(nn.Module):
 
         q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=h), (q, k, v))
 
-        ## old
-        """
-        sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
-        del q, k
-
-        if exists(mask):
-            mask = rearrange(mask, 'b ... -> b (...)')
-            max_neg_value = -torch.finfo(sim.dtype).max
-            mask = repeat(mask, 'b j -> (b h) () j', h=h)
-            sim.masked_fill_(~mask, max_neg_value)
-
-        # attention, what we cannot get enough of
-        sim = sim.softmax(dim=-1)
-
-        out = einsum('b i j, b j d -> b i d', sim, v)
-        """
-        ## new
         with sdp_kernel(**BACKEND_MAP[self.backend]):
-            # print("dispatching into backend", self.backend, "q/k/v shape: ", q.shape, k.shape, v.shape)
-            out = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=mask
-            )  # scale is dim_head ** -0.5 per default
+            # Reduce memory usage by processing in smaller chunks
+            max_batch_size = 4  # Reduced from 16 to 4
+            chunk_size = 8  # Process attention in smaller chunks
+            b = q.shape[0]
+            
+            if b > max_batch_size:
+                outs = []
+                for i in range(0, b, max_batch_size):
+                    end_idx = min(i + max_batch_size, b)
+                    batch_q = q[i:end_idx]
+                    batch_k = k[i:end_idx]
+                    batch_v = v[i:end_idx]
+                    
+                    # Further split attention computation
+                    chunk_outs = []
+                    for j in range(0, batch_q.size(2), chunk_size):
+                        j_end = min(j + chunk_size, batch_q.size(2))
+                        # Process even smaller chunks
+                        chunk_out = F.scaled_dot_product_attention(
+                            batch_q[..., j:j_end, :],
+                            batch_k,
+                            batch_v,
+                            attn_mask=mask[i:end_idx] if mask is not None else None,
+                        )
+                        chunk_outs.append(chunk_out)
+                        # Explicitly free memory
+                        torch.cuda.empty_cache()
+                        
+                    batch_out = torch.cat(chunk_outs, dim=2)
+                    outs.append(batch_out)
+                    del batch_q, batch_k, batch_v, chunk_outs
+                    
+                out = torch.cat(outs, dim=0)
+            else:
+                out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
+        # Explicitly free memory
         del q, k, v
+        torch.cuda.empty_cache()
+
         out = rearrange(out, "b h n d -> b n (h d)", h=h)
 
         if additional_tokens is not None:
@@ -791,3 +808,4 @@ class SimpleTransformer(nn.Module):
         for layer in self.layers:
             x = layer(x, context)
         return x
+

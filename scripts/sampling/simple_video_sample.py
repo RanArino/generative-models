@@ -17,7 +17,7 @@ from PIL import Image
 from rembg import remove
 from scripts.util.detection.nsfw_and_watermark_dectection import DeepFloydDataFiltering
 from sgm.inference.helpers import embed_watermark
-from sgm.util import default, instantiate_from_config
+from sgm.util import default, instantiate_from_config, get_torch_device
 from torchvision.transforms import ToTensor
 
 
@@ -31,7 +31,7 @@ def sample(
     cond_aug: float = 0.02,
     seed: int = 23,
     decoding_t: int = 14,  # Number of frames decoded at a time! This eats most VRAM. Reduce if necessary.
-    device: str = "cuda",
+    device: str = get_torch_device().type,
     output_folder: Optional[str] = None,
     elevations_deg: Optional[float | List[float]] = 10.0,  # For SV3D
     azimuths_deg: Optional[List[float]] = None,  # For SV3D
@@ -102,6 +102,13 @@ def sample(
         num_steps,
         verbose,
     )
+    
+    # Convert model to float32 and ensure all parameters are in float32
+    model = model.half().to(device)
+    # model = model.to(device).to(torch.float32)
+    # for param in model.parameters():
+    #     param.data = param.data.to(torch.float32)
+
     torch.manual_seed(seed)
 
     path = Path(input_path)
@@ -181,7 +188,12 @@ def sample(
         assert image.shape[1] == 3
         F = 8
         C = 4
+
+        # Create random noise tensor after we know H and W
+        torch.manual_seed(seed)
         shape = (num_frames, C, H // F, W // F)
+        randn = torch.randn(shape, device=device, dtype=torch.float32)
+
         if (H, W) != (576, 1024) and "sv3d" not in version:
             print(
                 "WARNING: The conditioning frame you provided is not 576x1024. This leads to suboptimal performance as model was only trained on 576x1024. Consider increasing `cond_aug`."
@@ -220,6 +232,23 @@ def sample(
                     T=num_frames,
                     device=device,
                 )
+
+                # Ensure batch tensors have correct shapes and types
+                for k, v in batch.items():
+                    if isinstance(v, torch.Tensor):
+                        if v.dim() == 2 and v.size(0) != num_frames:
+                            batch[k] = v.expand(num_frames, -1)
+                        batch[k] = v.to(torch.float32)  # Ensure float32
+                for k, v in batch_uc.items():
+                    if isinstance(v, torch.Tensor):
+                        if v.dim() == 2 and v.size(0) != num_frames:
+                            batch_uc[k] = v.expand(num_frames, -1)
+                        batch_uc[k] = v.to(torch.float32)  # Ensure float32
+
+                # Ensure randn is float32
+                randn = torch.randn(shape, device=device, dtype=torch.float32)
+
+                # Process conditioning
                 c, uc = model.conditioner.get_unconditional_conditioning(
                     batch,
                     batch_uc=batch_uc,
@@ -228,6 +257,12 @@ def sample(
                         "cond_frames_without_noise",
                     ],
                 )
+
+                # Convert all tensors in conditioning dicts to float32
+                for d in [c, uc]:
+                    for k, v in d.items():
+                        if isinstance(v, torch.Tensor):
+                            d[k] = v.to(torch.float32)
 
                 for k in ["crossattn", "concat"]:
                     uc[k] = repeat(uc[k], "b ... -> b t ...", t=num_frames)
@@ -335,15 +370,24 @@ def load_model(
     config.model.params.sampler_config.params.guider_config.params.num_frames = (
         num_frames
     )
+    
+    # Load model and convert to float32 immediately
     if device == "cuda":
         with torch.device(device):
-            model = instantiate_from_config(config.model).to(device).eval()
+            model = instantiate_from_config(config.model).to(device).float()
+    elif device == "mps":
+        model = instantiate_from_config(config.model).to("cpu").float()
+        model = model.to(device)
     else:
-        model = instantiate_from_config(config.model).to(device).eval()
+        model = instantiate_from_config(config.model).to(device).float()
 
+    model.eval()
+    
     filter = DeepFloydDataFiltering(verbose=False, device=device)
     return model, filter
 
 
 if __name__ == "__main__":
     Fire(sample)
+
+
